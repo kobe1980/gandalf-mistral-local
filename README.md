@@ -27,6 +27,8 @@ cp .env.example .env            # Windows: copy .env.example .env
 MISTRAL_API_KEY=colle_ta_cle_ici
 MISTRAL_MODEL=mistral-small-latest
 MISTRAL_BASE_URL=https://api.mistral.ai
+MISTRAL_MIN_INTERVAL_SECONDS=1.1
+MISTRAL_MAX_RETRIES=1
 ```
 
 Puis lance :
@@ -45,6 +47,39 @@ Ouvre **http://127.0.0.1:8000**.
 4. Place-la uniquement dans ton fichier local `.env`.
 
 **Ne mets jamais une vraie clé dans `.env.example` et ne commit jamais `.env`.** Le dépôt ignore volontairement ce fichier.
+
+## Diagnostic Mistral / erreurs 429
+
+Le backend journalise maintenant chaque appel Mistral sans afficher la clé ni le contenu du prompt :
+
+```text
+[mistral] request kind=chat model=mistral-small-latest attempt=1/2 input_chars=... max_tokens=500
+[mistral] response kind=chat status=429 latency_ms=... request_id=... rate={...}
+```
+
+Les headers `X-RateLimit-*`, `Retry-After` et les identifiants de requête sont affichés lorsqu'ils sont fournis par Mistral.
+
+Pour vérifier simplement que la clé peut joindre l'API sans lancer de completion :
+
+```bash
+curl http://127.0.0.1:8000/api/mistral/probe
+```
+
+Interprétation pratique :
+
+- `200` sur `/api/mistral/probe` : la clé est reconnue et peut interroger l'API ; un `429` sur le chat pointe alors vers une limite de débit/tokens/quota du workspace.
+- `401` : clé incorrecte, expirée ou non reconnue.
+- `402` : configuration de facturation/API incompatible avec l'appel demandé.
+- `429` : limite Mistral atteinte. Vérifie **Admin → Limits** et l'usage du workspace dans Mistral Studio.
+
+Les clés Mistral sont rattachées à un workspace et utilisent les limites/quota de ce workspace. Les limites sont appliquées sur les requêtes par seconde, les tokens par minute et le quota global. Le free tier a les limites les plus basses.
+
+Gandalf impose par défaut au moins `1.1` seconde entre deux appels Mistral et retente une fois un `429`, en respectant `Retry-After` quand Mistral le fournit. C'est utile aux niveaux 4, 6, 7 et 8, qui peuvent nécessiter plusieurs appels pour une seule tentative. Pour désactiver ce pacing sur un compte avec des limites supérieures :
+
+```dotenv
+MISTRAL_MIN_INTERVAL_SECONDS=0
+MISTRAL_MAX_RETRIES=0
+```
 
 ## Docker
 
@@ -84,14 +119,24 @@ Les mots de passe ont la forme `COBALT-RUNE-1234`, mais leur valeur est génér�
 app/
   main.py             # API FastAPI et endpoints du jeu
   game.py             # niveaux, secrets et filtres heuristiques
-  mistral_client.py   # client HTTP Mistral et juges LLM
+  mistral_client.py   # client HTTP Mistral, pacing, logs et juges LLM
 static/
   index.html           # interface
   app.js
   styles.css
 tests/
   test_game.py
+  test_api.py
 ```
+
+Endpoints utiles :
+
+- `GET /api/config`
+- `GET /api/health`
+- `GET /api/mistral/probe`
+- `POST /api/chat`
+- `POST /api/guess`
+- `POST /api/reset`
 
 ## Tests
 
