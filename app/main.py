@@ -26,16 +26,33 @@ from .mistral_client import MistralClient, MistralError
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
 client = MistralClient(
     api_key=os.getenv("MISTRAL_API_KEY", ""),
     model=os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
     base_url=os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai"),
+    min_interval_seconds=_env_float("MISTRAL_MIN_INTERVAL_SECONDS", 1.1),
+    max_retries=_env_int("MISTRAL_MAX_RETRIES", 1),
 )
 
 app = FastAPI(
     title="Gandalf Mistral Local",
     description="Jeu local éducatif de prompt injection inspiré de Gandalf.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 
@@ -62,18 +79,46 @@ def _level_or_404(level_id: int):
     return level
 
 
+def _raise_mistral_http(exc: MistralError) -> None:
+    upstream = exc.status_code
+    status = upstream if upstream is not None and 400 <= upstream < 500 else 502
+    raise HTTPException(
+        status_code=status,
+        detail={
+            "message": str(exc),
+            "upstream_status": upstream,
+            "request_id": exc.request_id,
+            "rate_limits": exc.rate_limit_headers,
+        },
+    ) from exc
+
+
 @app.get("/api/config")
 async def config() -> dict:
     return {
         "configured": client.configured,
         "model": client.model,
         "levels": len(LEVELS),
+        "min_interval_seconds": client.min_interval_seconds,
+        "max_retries": client.max_retries,
     }
 
 
 @app.get("/api/levels")
 async def levels() -> list[dict]:
     return public_levels()
+
+
+@app.get("/api/mistral/probe")
+async def mistral_probe() -> dict:
+    """Check that the key can reach Mistral without running a completion."""
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="MISTRAL_API_KEY absente")
+    try:
+        return await client.probe()
+    except MistralError as exc:
+        _raise_mistral_http(exc)
+        raise AssertionError("unreachable")
 
 
 @app.post("/api/chat")
@@ -103,7 +148,7 @@ async def chat(req: ChatRequest) -> dict:
                     "guard": "input-llm",
                 }
         except MistralError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            _raise_mistral_http(exc)
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": build_system_prompt(level, secret)}
@@ -115,7 +160,8 @@ async def chat(req: ChatRequest) -> dict:
     try:
         reply = await client.chat(messages)
     except MistralError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        _raise_mistral_http(exc)
+        raise AssertionError("unreachable")
 
     if level.semantic_output_guard:
         try:
@@ -126,7 +172,7 @@ async def chat(req: ChatRequest) -> dict:
                     "guard": "output-semantic",
                 }
         except MistralError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            _raise_mistral_http(exc)
 
     if level.exact_output_guard:
         redacted = apply_exact_redaction(reply, secret)
@@ -156,7 +202,13 @@ async def reset() -> dict:
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"ok": True, "mistral_configured": client.configured, "model": client.model}
+    return {
+        "ok": True,
+        "mistral_configured": client.configured,
+        "model": client.model,
+        "min_interval_seconds": client.min_interval_seconds,
+        "max_retries": client.max_retries,
+    }
 
 
 STATIC_DIR = BASE_DIR / "static"
