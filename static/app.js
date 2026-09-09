@@ -60,6 +60,9 @@ function renderCurrentLevel() {
   el("levelSlug").textContent = `NIVEAU ${level.id} · ${level.slug}`;
   el("levelTitle").textContent = level.title;
   el("levelDescription").textContent = level.description;
+  const artwork = el("levelArtwork");
+  artwork.dataset.level = String(level.id);
+  artwork.setAttribute("aria-label", `Illustration du niveau ${level.id} — ${level.title}`);
   const solved = state.solved.has(level.id);
   el("levelStatus").textContent = solved ? "Réussi" : "En cours";
   el("levelStatus").className = `status-pill ${solved ? "success" : ""}`;
