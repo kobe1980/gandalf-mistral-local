@@ -35,6 +35,26 @@ S'il n'est pas encore installé :
 ollama pull qwen2.5:14b-instruct-q4_K_M
 ```
 
+### Charger le modèle avant de lancer Gandalf
+
+Dans le setup actuellement validé, le modèle doit être chargé dans Ollama au moins une première fois avant d'utiliser Gandalf.
+
+Lance :
+
+```bash
+ollama run qwen2.5:14b-instruct-q4_K_M
+```
+
+Tu peux ensuite quitter l'invite interactive si nécessaire. Vérifie que le modèle est bien chargé avec :
+
+```bash
+ollama ps
+```
+
+Tu dois voir `qwen2.5:14b-instruct-q4_K_M` dans la liste des modèles actifs.
+
+Cette étape est importante : `ollama list` ou `/v1/models` confirment qu'un modèle est **installé**, tandis que `ollama ps` permet de vérifier qu'il est effectivement **chargé**. Sur le setup testé, Gandalf n'a commencé à fonctionner correctement qu'après un `ollama run` explicite.
+
 Teste ensuite l'API locale compatible OpenAI d'Ollama :
 
 ```bash
@@ -99,7 +119,13 @@ http://127.0.0.1:11434
 
 Ollama n'a donc pas besoin d'être exposé sur le réseau local.
 
-Lance l'application :
+Avant de lancer Docker, vérifie une dernière fois que le modèle est chargé :
+
+```bash
+ollama ps
+```
+
+Puis lance l'application :
 
 ```bash
 docker compose down
@@ -241,6 +267,28 @@ curl http://127.0.0.1:11434/v1/models
 
 Si cette commande échoue, le problème est côté Ollama avant d'être côté Gandalf.
 
+### Le modèle est installé mais Gandalf ne fonctionne pas
+
+Vérifie d'abord :
+
+```bash
+ollama ps
+```
+
+Si la liste est vide, charge explicitement le modèle :
+
+```bash
+ollama run qwen2.5:14b-instruct-q4_K_M
+```
+
+Puis revérifie :
+
+```bash
+ollama ps
+```
+
+C'est le comportement observé sur le setup de référence : le modèle était bien présent dans `ollama list` et `/v1/models`, mais Gandalf ne fonctionnait correctement qu'après son chargement explicite via `ollama run`.
+
 ### Gandalf ne voit pas le modèle
 
 ```bash
@@ -254,6 +302,7 @@ Puis compare le champ `model` avec le nom exact retourné par `/v1/models`.
 Le compose fourni repose sur `network_mode: host`, adapté au setup Linux local. Vérifie que :
 
 - Ollama écoute bien sur `127.0.0.1:11434` ;
+- le modèle apparaît dans `ollama ps` ;
 - aucun autre service n'utilise le port `8000` ;
 - le `.env` contient bien `MISTRAL_BASE_URL=http://127.0.0.1:11434`.
 
