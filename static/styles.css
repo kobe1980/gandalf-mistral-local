@@ -52,6 +52,27 @@ h1 span { color: var(--accent); }
 .sidebar-note { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: .82rem; line-height: 1.5; }
 
 .level-description { color: var(--muted); margin: 7px 0 0; }
+.level-art-shell { display: flex; justify-content: center; margin: 18px 0 4px; }
+.level-art {
+  width: min(100%, 300px);
+  aspect-ratio: 8 / 9;
+  background-image: url('/static/levels.webp');
+  background-repeat: no-repeat;
+  background-size: 400% 200%;
+  background-position: 0 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .28);
+}
+.level-art[data-level="1"] { background-position: 0% 0%; }
+.level-art[data-level="2"] { background-position: 33.333% 0%; }
+.level-art[data-level="3"] { background-position: 66.667% 0%; }
+.level-art[data-level="4"] { background-position: 100% 0%; }
+.level-art[data-level="5"] { background-position: 0% 100%; }
+.level-art[data-level="6"] { background-position: 33.333% 100%; }
+.level-art[data-level="7"] { background-position: 66.667% 100%; }
+.level-art[data-level="8"] { background-position: 100% 100%; }
+
 .chat { flex: 1; min-height: 360px; max-height: 480px; overflow-y: auto; margin: 22px 0 14px; padding: 18px; background: #0c0f15; border: 1px solid var(--border); border-radius: 14px; }
 .welcome-card { height: 100%; min-height: 300px; display: flex; align-items: center; justify-content: center; gap: 16px; color: var(--muted); text-align: left; }
 .welcome-card strong { color: var(--text); }
@@ -86,6 +107,7 @@ footer { padding: 20px 4px 0; color: var(--muted); font-size: .78rem; text-align
   .layout { grid-template-columns: 1fr; }
   .level-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-panel { min-height: 620px; }
+  .level-art { width: min(100%, 280px); }
 }
 
 @media (max-width: 540px) {
@@ -94,4 +116,5 @@ footer { padding: 20px 4px 0; color: var(--muted); font-size: .78rem; text-align
   .prompt-form, .guess-form { grid-template-columns: 1fr; }
   .prompt-form button, .guess-form button { min-height: 44px; }
   .message { max-width: 94%; }
+  .level-art { width: min(100%, 250px); }
 }
