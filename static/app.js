@@ -98,13 +98,35 @@ function selectLevel(levelId) {
   el("promptInput").focus();
 }
 
+function errorMessage(detail, fallback) {
+  if (typeof detail === "string" && detail) return detail;
+  if (detail && typeof detail === "object") {
+    const parts = [];
+    if (detail.message) parts.push(detail.message);
+    if (detail.request_id) parts.push(`request_id=${detail.request_id}`);
+    if (detail.rate_limits && Object.keys(detail.rate_limits).length) {
+      const headers = Object.entries(detail.rate_limits)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(", ");
+      parts.push(headers);
+    }
+    if (parts.length) return parts.join(" · ");
+  }
+  return fallback;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(errorMessage(data.detail, `HTTP ${response.status}`));
+    error.status = response.status;
+    error.details = data.detail;
+    throw error;
+  }
   return data;
 }
 
@@ -130,7 +152,8 @@ async function sendPrompt(event) {
     });
     history.push({ role: "assistant", content: data.reply });
   } catch (error) {
-    history.push({ role: "assistant", content: `Erreur : ${error.message}` });
+    const prefix = error.status ? `Erreur HTTP ${error.status}` : "Erreur";
+    history.push({ role: "assistant", content: `${prefix} : ${error.message}` });
   } finally {
     el("sendButton").disabled = false;
     el("sendButton").textContent = "Envoyer";
