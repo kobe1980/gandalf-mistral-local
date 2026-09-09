@@ -1,95 +1,171 @@
-# Gandalf Mistral Local 🧙‍♂️
+# Gandalf Local 🧙‍♂️
 
-Clone éducatif **local** inspiré du jeu Gandalf de Lakera : le joueur tente d'extraire un mot de passe caché dans le contexte d'un LLM à l'aide de prompt injection.
+Clone éducatif **100 % local** inspiré du jeu Gandalf de Lakera : le joueur tente d'extraire un mot de passe caché dans le contexte d'un LLM à l'aide de prompt injection.
 
-Cette version utilise l'API **Mistral AI**, fonctionne avec le mode API Free (dans les limites du quota du compte), génère ses mots de passe dynamiquement côté serveur et propose 8 niveaux de défense progressifs.
+Cette version utilise **Ollama** avec un modèle local, par défaut `qwen2.5:14b-instruct-q4_K_M`. Aucun compte cloud, aucune clé API réelle et aucun quota externe ne sont nécessaires.
 
-> Projet indépendant à but pédagogique. Non affilié à Lakera ni à Mistral AI. N'utilise jamais ce projet avec de vrais secrets.
+> Projet indépendant à but pédagogique. Non affilié à Lakera, Mistral AI ou Ollama. N'utilise jamais ce projet avec de vrais secrets.
 
-## Démarrage rapide
+## Prérequis
 
-Prérequis : Python 3.9+ et une clé API Mistral.
+- Linux / Ubuntu recommandé pour le `docker-compose.yml` fourni
+- Docker + Docker Compose
+- Ollama installé sur la machine hôte
+- le modèle `qwen2.5:14b-instruct-q4_K_M`
+
+Le modèle attendu est également documenté dans `ollama-models.txt`.
+
+## 1. Installer / vérifier Ollama
+
+Vérifie qu'Ollama fonctionne :
+
+```bash
+ollama list
+```
+
+Le modèle suivant doit être présent :
+
+```text
+qwen2.5:14b-instruct-q4_K_M
+```
+
+S'il n'est pas encore installé :
+
+```bash
+ollama pull qwen2.5:14b-instruct-q4_K_M
+```
+
+Teste ensuite l'API locale compatible OpenAI d'Ollama :
+
+```bash
+curl http://127.0.0.1:11434/v1/models
+```
+
+Tu dois obtenir une réponse contenant notamment :
+
+```json
+{
+  "id": "qwen2.5:14b-instruct-q4_K_M"
+}
+```
+
+## 2. Cloner le projet
 
 ```bash
 git clone git@github.com:kobe1980/gandalf-mistral-local.git
 cd gandalf-mistral-local
-
-python -m venv .venv
-source .venv/bin/activate       # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-cp .env.example .env            # Windows: copy .env.example .env
+cp .env.example .env
 ```
 
-Édite ensuite `.env` :
+## 3. Configurer `.env` pour Ollama
+
+Utilise cette configuration :
 
 ```dotenv
-MISTRAL_API_KEY=colle_ta_cle_ici
-MISTRAL_MODEL=mistral-small-latest
-MISTRAL_BASE_URL=https://api.mistral.ai
-MISTRAL_MIN_INTERVAL_SECONDS=1.1
-MISTRAL_MAX_RETRIES=1
+MISTRAL_API_KEY=ollama
+MISTRAL_MODEL=qwen2.5:14b-instruct-q4_K_M
+MISTRAL_BASE_URL=http://127.0.0.1:11434
+MISTRAL_MIN_INTERVAL_SECONDS=0
+MISTRAL_MAX_RETRIES=0
 ```
 
-Puis lance :
+### Pourquoi les variables s'appellent encore `MISTRAL_*` ?
 
-```bash
-uvicorn app.main:app --reload
+Le client HTTP historique du projet s'appelle encore `MistralClient` et lit ces variables. Il parle cependant à une API de type OpenAI `/v1/chat/completions`, ce qu'Ollama expose également.
+
+La valeur :
+
+```dotenv
+MISTRAL_API_KEY=ollama
 ```
 
-Ouvre **http://127.0.0.1:8000**.
+est donc une **clé factice**. Ollama local n'en a pas besoin ; elle est uniquement renseignée parce que le code actuel considère le client comme configuré lorsqu'une valeur non vide est présente.
 
-## Obtenir une clé Mistral Free
+`MISTRAL_MIN_INTERVAL_SECONDS=0` et `MISTRAL_MAX_RETRIES=0` désactivent le pacing et les retries qui étaient nécessaires avec les quotas de l'API Mistral.
 
-1. Ouvre Mistral Studio : https://console.mistral.ai/
-2. Va dans **API Keys**.
-3. Crée une nouvelle clé et copie-la immédiatement.
-4. Place-la uniquement dans ton fichier local `.env`.
+## 4. Lancer Gandalf avec Docker
 
-**Ne mets jamais une vraie clé dans `.env.example` et ne commit jamais `.env`.** Le dépôt ignore volontairement ce fichier.
+Le `docker-compose.yml` utilise :
 
-## Diagnostic Mistral / erreurs 429
+```yaml
+network_mode: host
+```
 
-Le backend journalise maintenant chaque appel Mistral sans afficher la clé ni le contenu du prompt :
+Cela permet au conteneur Gandalf d'accéder directement à l'Ollama de la machine hôte via :
 
 ```text
-[mistral] request kind=chat model=mistral-small-latest attempt=1/2 input_chars=... max_tokens=500
-[mistral] response kind=chat status=429 latency_ms=... request_id=... rate={...}
+http://127.0.0.1:11434
 ```
 
-Les headers `X-RateLimit-*`, `Retry-After` et les identifiants de requête sont affichés lorsqu'ils sont fournis par Mistral.
+Ollama n'a donc pas besoin d'être exposé sur le réseau local.
 
-Pour vérifier simplement que la clé peut joindre l'API sans lancer de completion :
+Lance l'application :
+
+```bash
+docker compose down
+docker compose up --build
+```
+
+Puis ouvre :
+
+```text
+http://127.0.0.1:8000
+```
+
+## 5. Vérifier la connexion Gandalf → Ollama
+
+Le nom de l'endpoint conserve encore la terminologie historique Mistral :
 
 ```bash
 curl http://127.0.0.1:8000/api/mistral/probe
 ```
 
-Interprétation pratique :
+Une configuration correcte doit retourner quelque chose de proche de :
 
-- `200` sur `/api/mistral/probe` : la clé est reconnue et peut interroger l'API ; un `429` sur le chat pointe alors vers une limite de débit/tokens/quota du workspace.
-- `401` : clé incorrecte, expirée ou non reconnue.
-- `402` : configuration de facturation/API incompatible avec l'appel demandé.
-- `429` : limite Mistral atteinte. Vérifie **Admin → Limits** et l'usage du workspace dans Mistral Studio.
-
-Les clés Mistral sont rattachées à un workspace et utilisent les limites/quota de ce workspace. Les limites sont appliquées sur les requêtes par seconde, les tokens par minute et le quota global. Le free tier a les limites les plus basses.
-
-Gandalf impose par défaut au moins `1.1` seconde entre deux appels Mistral et retente une fois un `429`, en respectant `Retry-After` quand Mistral le fournit. C'est utile aux niveaux 4, 6, 7 et 8, qui peuvent nécessiter plusieurs appels pour une seule tentative. Pour désactiver ce pacing sur un compte avec des limites supérieures :
-
-```dotenv
-MISTRAL_MIN_INTERVAL_SECONDS=0
-MISTRAL_MAX_RETRIES=0
+```json
+{
+  "ok": true,
+  "model": "qwen2.5:14b-instruct-q4_K_M",
+  "model_listed": true
+}
 ```
 
-## Docker
+Si `model_listed` vaut `false`, vérifie le nom exact retourné par :
 
 ```bash
-cp .env.example .env
-# renseigne MISTRAL_API_KEY dans .env
-docker compose up --build
+curl http://127.0.0.1:11434/v1/models
 ```
 
-Puis ouvre **http://127.0.0.1:8000**.
+## Lancer sans Docker
+
+Il est aussi possible de faire tourner FastAPI directement sur la machine hôte :
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+Avec le même `.env`, l'application joindra directement Ollama sur `127.0.0.1:11434`.
+
+## Dépendances
+
+`requirements.txt` contient uniquement les dépendances **Python** de l'application : FastAPI, HTTPX, python-dotenv et Uvicorn.
+
+Ollama et les modèles Ollama ne sont pas des packages Python et ne doivent donc pas être ajoutés à `requirements.txt`.
+
+Les modèles locaux requis sont documentés séparément dans :
+
+```text
+ollama-models.txt
+```
+
+Configuration actuelle :
+
+```text
+qwen2.5:14b-instruct-q4_K_M
+```
 
 ## Les 8 niveaux
 
@@ -106,12 +182,20 @@ Puis ouvre **http://127.0.0.1:8000**.
 
 Les mots de passe ont la forme `COBALT-RUNE-1234`, mais leur valeur est générée aléatoirement au démarrage et lors de **Nouvelle partie**. Elle n'est jamais envoyée au navigateur.
 
+Aux niveaux avancés, plusieurs inférences locales peuvent être exécutées pour une seule tentative :
+
+- Gandalf génère sa réponse ;
+- un second appel au même modèle peut classifier le prompt entrant ;
+- un autre appel peut juger si la réponse divulgue le secret.
+
+Avec Ollama, tous ces appels restent locaux.
+
 ## Comment jouer
 
 - Envoie des prompts à Gandalf dans la zone de chat.
-- Si tu penses avoir extrait le secret, saisis-le dans le champ **Mot de passe extrait**.
+- Essaie différentes techniques de prompt injection.
+- Si tu penses avoir extrait le secret, saisis-le dans **Mot de passe extrait**.
 - Un niveau réussi déverrouille le suivant.
-- Les niveaux 4, 6, 7 et 8 peuvent consommer plusieurs appels Mistral par tentative parce qu'un second LLM joue le rôle de garde/judge.
 
 ## Architecture
 
@@ -119,11 +203,13 @@ Les mots de passe ont la forme `COBALT-RUNE-1234`, mais leur valeur est génér�
 app/
   main.py             # API FastAPI et endpoints du jeu
   game.py             # niveaux, secrets et filtres heuristiques
-  mistral_client.py   # client HTTP Mistral, pacing, logs et juges LLM
+  mistral_client.py   # client HTTP compatible OpenAI, actuellement utilisé avec Ollama
 static/
   index.html           # interface
   app.js
   styles.css
+  levels/              # illustrations HD des 8 niveaux
+ollama-models.txt      # modèle Ollama attendu
 tests/
   test_game.py
   test_api.py
@@ -144,6 +230,32 @@ Endpoints utiles :
 pip install -r requirements-dev.txt
 pytest -q
 ```
+
+## Diagnostic rapide
+
+### Ollama ne répond pas
+
+```bash
+curl http://127.0.0.1:11434/v1/models
+```
+
+Si cette commande échoue, le problème est côté Ollama avant d'être côté Gandalf.
+
+### Gandalf ne voit pas le modèle
+
+```bash
+curl http://127.0.0.1:8000/api/mistral/probe
+```
+
+Puis compare le champ `model` avec le nom exact retourné par `/v1/models`.
+
+### Le conteneur démarre mais ne joint pas Ollama
+
+Le compose fourni repose sur `network_mode: host`, adapté au setup Linux local. Vérifie que :
+
+- Ollama écoute bien sur `127.0.0.1:11434` ;
+- aucun autre service n'utilise le port `8000` ;
+- le `.env` contient bien `MISTRAL_BASE_URL=http://127.0.0.1:11434`.
 
 ## Avertissement sécurité
 
