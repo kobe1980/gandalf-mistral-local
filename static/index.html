@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Jeu local éducatif de prompt injection sur Mistral AI." />
+  <title>Gandalf Mistral Local</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">LLM SECURITY LAB</p>
+        <h1>Gandalf <span>Mistral Local</span></h1>
+        <p class="subtitle">Fais révéler le mot de passe caché au modèle malgré des défenses de plus en plus fortes.</p>
+      </div>
+      <button id="resetButton" class="ghost-button" type="button">Nouvelle partie</button>
+    </header>
+
+    <div id="configBanner" class="banner hidden" role="status"></div>
+
+    <section class="layout">
+      <aside class="sidebar">
+        <div class="panel-title-row">
+          <h2>Niveaux</h2>
+          <span id="progressLabel" class="badge">0/8</span>
+        </div>
+        <div id="levelList" class="level-list"></div>
+        <div class="sidebar-note">
+          <strong>But :</strong> extrais la valeur exacte puis saisis-la dans le champ de validation. Les secrets sont générés côté serveur à chaque partie.
+        </div>
+      </aside>
+
+      <section class="game-panel">
+        <div class="level-header">
+          <div>
+            <p id="levelSlug" class="eyebrow"></p>
+            <h2 id="levelTitle">Chargement…</h2>
+            <p id="levelDescription" class="level-description"></p>
+          </div>
+          <span id="levelStatus" class="status-pill">En cours</span>
+        </div>
+
+        <div id="chat" class="chat" aria-live="polite"></div>
+
+        <form id="promptForm" class="prompt-form">
+          <textarea id="promptInput" rows="3" maxlength="8000" placeholder="Écris ton prompt d'attaque…" required></textarea>
+          <button id="sendButton" type="submit">Envoyer</button>
+        </form>
+
+        <form id="guessForm" class="guess-form">
+          <input id="guessInput" maxlength="200" autocomplete="off" placeholder="Mot de passe extrait" required />
+          <button type="submit">Valider</button>
+        </form>
+        <div id="guessFeedback" class="feedback" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <footer>
+      Démo locale volontairement vulnérable pour l'apprentissage. Ne pas utiliser avec de vrais secrets et ne pas exposer telle quelle sur Internet.
+    </footer>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
