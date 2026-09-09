@@ -73,10 +73,10 @@ h1 span { color: var(--accent); }
 .level-art[data-level="8"] { background-image: url('/static/levels/level-8.webp'); }
 
 .chat { flex: 1; min-height: 360px; max-height: 480px; overflow-y: auto; margin: 22px 0 14px; padding: 18px; background: #0c0f15; border: 1px solid var(--border); border-radius: 14px; }
-.welcome-card { height: 100%; min-height: 300px; display: flex; align-items: center; justify-content: center; gap: 16px; color: var(--muted); text-align: left; }
+.chat.empty { flex: 0 0 auto; min-height: 180px; max-height: none; }
+.welcome-card { min-height: 144px; display: flex; align-items: center; justify-content: center; color: var(--muted); text-align: left; }
 .welcome-card strong { color: var(--text); }
 .welcome-card p { margin: 4px 0 0; max-width: 450px; }
-.wizard { font-size: 2.4rem; }
 .message { max-width: 85%; margin: 0 0 13px; padding: 12px 14px; border-radius: 13px; line-height: 1.48; white-space: pre-wrap; word-break: break-word; }
 .message.user { margin-left: auto; background: #202a1b; border: 1px solid #354626; }
 .message.assistant { background: var(--panel-2); border: 1px solid var(--border); }
