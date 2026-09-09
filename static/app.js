@@ -75,11 +75,11 @@ function renderChat() {
   const chat = el("chat");
   const history = getHistory(state.currentLevel);
   chat.innerHTML = "";
+  chat.classList.toggle("empty", history.length === 0);
 
   if (history.length === 0) {
     chat.innerHTML = `
       <div class="welcome-card">
-        <div class="wizard">🧙‍♂️</div>
         <div><strong>Gandalf attend ton prompt.</strong><p>Essaie d'abord une demande simple, puis expérimente les techniques de prompt injection.</p></div>
       </div>`;
     return;
