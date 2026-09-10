@@ -91,6 +91,20 @@ class MistralClient:
                 pass
         return min(1.0 * (2**attempt), 8.0)
 
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "".join(parts)
+        return ""
+
     async def _paced_request(
         self,
         client: httpx.AsyncClient,
@@ -114,7 +128,7 @@ class MistralClient:
                 wait_for = max(0.0, self.min_interval_seconds - elapsed_since_start)
                 if wait_for:
                     logger.info(
-                        "[mistral] pacing %.2fs before %s call",
+                        "[llm] pacing %.2fs before %s call",
                         wait_for,
                         call_kind,
                     )
@@ -123,7 +137,7 @@ class MistralClient:
                 self._last_request_started = time.monotonic()
                 started = time.perf_counter()
                 logger.info(
-                    "[mistral] request kind=%s model=%s attempt=%d/%d input_chars=%d max_tokens=%s",
+                    "[llm] request kind=%s model=%s attempt=%d/%d input_chars=%d max_tokens=%s",
                     call_kind,
                     self.model,
                     attempt + 1,
@@ -139,13 +153,13 @@ class MistralClient:
                         json=json_payload,
                     )
                 except httpx.HTTPError as exc:
-                    logger.error("[mistral] network error kind=%s error=%s", call_kind, exc)
-                    raise MistralError(f"Impossible de joindre l'API Mistral: {exc}") from exc
+                    logger.error("[llm] network error kind=%s error=%s", call_kind, exc)
+                    raise MistralError(f"Impossible de joindre l'API LLM: {exc}") from exc
 
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 diagnostic = self._diagnostic_headers(response)
                 logger.info(
-                    "[mistral] response kind=%s status=%d latency_ms=%d request_id=%s rate=%s",
+                    "[llm] response kind=%s status=%d latency_ms=%d request_id=%s rate=%s",
                     call_kind,
                     response.status_code,
                     latency_ms,
@@ -158,7 +172,7 @@ class MistralClient:
 
             delay = self._retry_delay(response, attempt)
             logger.warning(
-                "[mistral] 429 rate limited; retrying in %.2fs (%d retry remaining)",
+                "[llm] 429 rate limited; retrying in %.2fs (%d retry remaining)",
                 delay,
                 self.max_retries - attempt,
             )
@@ -173,7 +187,7 @@ class MistralClient:
         detail = self._error_detail(response)
         suffix = f" — {detail}" if detail else ""
         raise MistralError(
-            f"API Mistral HTTP {response.status_code}{suffix}",
+            f"LLM HTTP {response.status_code}{suffix}",
             status_code=response.status_code,
             request_id=self._request_id(response),
             rate_limit_headers=self._diagnostic_headers(response),
@@ -185,6 +199,7 @@ class MistralClient:
         *,
         temperature: float = 0.5,
         max_tokens: int = 500,
+        call_kind: str = "chat",
     ) -> str:
         if not self.configured:
             raise MistralError("MISTRAL_API_KEY n'est pas configurée dans le fichier .env")
@@ -194,42 +209,129 @@ class MistralClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "stream": True,
         }
         input_chars = sum(len(message.get("content", "")) for message in messages)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{self.base_url}/v1/chat/completions"
 
-        async with httpx.AsyncClient(timeout=45.0) as http_client:
-            response = await self._paced_request(
-                http_client,
-                "POST",
-                f"{self.base_url}/v1/chat/completions",
-                json_payload=payload,
-                call_kind="chat",
-                input_chars=input_chars,
-                max_tokens=max_tokens,
+        for attempt in range(self.max_retries + 1):
+            retry_response: httpx.Response | None = None
+
+            async with self._request_lock:
+                elapsed_since_start = time.monotonic() - self._last_request_started
+                wait_for = max(0.0, self.min_interval_seconds - elapsed_since_start)
+                if wait_for:
+                    logger.info("[llm] pacing %.2fs before %s call", wait_for, call_kind)
+                    await asyncio.sleep(wait_for)
+
+                self._last_request_started = time.monotonic()
+                started = time.perf_counter()
+                first_token_at: float | None = None
+                parts: list[str] = []
+
+                logger.info(
+                    "[llm] request kind=%s model=%s attempt=%d/%d input_chars=%d max_tokens=%d stream=true",
+                    call_kind,
+                    self.model,
+                    attempt + 1,
+                    self.max_retries + 1,
+                    input_chars,
+                    max_tokens,
+                )
+
+                try:
+                    async with httpx.AsyncClient(timeout=45.0) as http_client:
+                        async with http_client.stream(
+                            "POST",
+                            url,
+                            headers=headers,
+                            json=payload,
+                        ) as response:
+                            if response.status_code >= 400:
+                                await response.aread()
+                                retry_response = response
+                            else:
+                                async for line in response.aiter_lines():
+                                    if not line or not line.startswith("data:"):
+                                        continue
+                                    data_line = line[5:].strip()
+                                    if not data_line or data_line == "[DONE]":
+                                        continue
+                                    try:
+                                        event = json.loads(data_line)
+                                        content = event["choices"][0]["delta"].get("content")
+                                    except (ValueError, KeyError, IndexError, TypeError):
+                                        continue
+
+                                    text = self._content_to_text(content)
+                                    if not text:
+                                        continue
+
+                                    if first_token_at is None:
+                                        first_token_at = time.perf_counter()
+                                        logger.info(
+                                            "[llm] ttft kind=%s model=%s ttft_ms=%d",
+                                            call_kind,
+                                            self.model,
+                                            int((first_token_at - started) * 1000),
+                                        )
+                                    parts.append(text)
+                except httpx.HTTPError as exc:
+                    logger.error("[llm] network error kind=%s error=%s", call_kind, exc)
+                    raise MistralError(f"Impossible de joindre l'API LLM: {exc}") from exc
+
+                total_ms = int((time.perf_counter() - started) * 1000)
+
+                if retry_response is None:
+                    if first_token_at is None:
+                        logger.warning(
+                            "[llm] response kind=%s model=%s status=200 ttft_ms=- total_ms=%d no_content=true",
+                            call_kind,
+                            self.model,
+                            total_ms,
+                        )
+                        raise MistralError("Réponse LLM inattendue: aucun contenu streamé")
+
+                    ttft_ms = int((first_token_at - started) * 1000)
+                    logger.info(
+                        "[llm] response kind=%s model=%s status=200 ttft_ms=%d total_ms=%d output_chars=%d",
+                        call_kind,
+                        self.model,
+                        ttft_ms,
+                        total_ms,
+                        sum(len(part) for part in parts),
+                    )
+                    return "".join(parts).strip()
+
+                logger.info(
+                    "[llm] response kind=%s model=%s status=%d ttft_ms=- total_ms=%d request_id=%s rate=%s",
+                    call_kind,
+                    self.model,
+                    retry_response.status_code,
+                    total_ms,
+                    self._request_id(retry_response) or "-",
+                    self._diagnostic_headers(retry_response) or "-",
+                )
+
+            if retry_response.status_code != 429 or attempt >= self.max_retries:
+                self._raise_for_error(retry_response)
+
+            delay = self._retry_delay(retry_response, attempt)
+            logger.warning(
+                "[llm] 429 rate limited; retrying in %.2fs (%d retry remaining)",
+                delay,
+                self.max_retries - attempt,
             )
+            await asyncio.sleep(delay)
 
-        self._raise_for_error(response)
-
-        try:
-            data = response.json()
-            content: Any = data["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise MistralError("Réponse Mistral inattendue") from exc
-
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                    parts.append(item["text"])
-            return "\n".join(parts).strip()
-        return str(content).strip()
+        raise AssertionError("unreachable")
 
     async def probe(self) -> dict[str, Any]:
-        """Validate the API key without sending a chat prompt."""
+        """Validate that the configured endpoint is reachable without running a completion."""
         if not self.configured:
             raise MistralError("MISTRAL_API_KEY n'est pas configurée dans le fichier .env")
 
@@ -245,7 +347,7 @@ class MistralClient:
         try:
             data = response.json()
         except ValueError as exc:
-            raise MistralError("Réponse Mistral inattendue sur /v1/models") from exc
+            raise MistralError("Réponse LLM inattendue sur /v1/models") from exc
 
         models = data.get("data", []) if isinstance(data, dict) else []
         model_ids = {
@@ -276,6 +378,7 @@ class MistralClient:
             ],
             temperature=0.0,
             max_tokens=8,
+            call_kind="input-guard",
         )
         return verdict.upper().startswith("BLOCK")
 
@@ -297,5 +400,6 @@ class MistralClient:
             ],
             temperature=0.0,
             max_tokens=8,
+            call_kind="output-guard",
         )
         return verdict.upper().startswith("BLOCK")
